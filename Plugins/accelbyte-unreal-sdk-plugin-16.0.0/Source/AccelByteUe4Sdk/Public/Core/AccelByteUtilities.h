@@ -1,0 +1,264 @@
+// Copyright (c) 2020-2022 AccelByte Inc. All Rights Reserved.
+// This is licensed software from AccelByte Inc, for limitations
+// and restrictions contact your company contract manager.
+
+#pragma once
+
+#include "Core/AccelByteError.h"
+#include "JsonObjectConverter.h"
+
+#include "AccelByteUtilities.generated.h"
+
+using AccelByte::THandler;
+using AccelByte::FErrorHandler;
+
+enum class EAccelBytePlatformType : uint8;
+
+enum class EJwtResult
+{
+	Ok,
+	MalformedJwt,
+	SignatureMismatch,
+	AlgorithmMismatch,
+	MalformedPublicKey
+};
+
+/**
+ * @brief RSA public key with parameters encoded in Base64Url. Only supports 2048 bits modulus and 24 bits exponent
+ */
+class ACCELBYTEUE4SDK_API FRsaPublicKey
+{
+public:
+	
+	/**
+	 * @brief Construct FRsaPublicKey with modulus and exponent
+	 * @param ModulusB64Url RSA modulus (n) in Base64URL format
+	 * @param ExponentB64Url RSA exponent (e) in Base64URL format
+	 */
+	FRsaPublicKey(FString ModulusB64Url, FString ExponentB64Url); 
+
+	/**
+	 * @brief Check if this RSA public key is valid.    
+	 */
+	bool IsValid() const;
+
+	
+	/**
+	 * @brief Convert RSA public key to armored PEM format
+	 * @return PEM format armored with "-----BEGIN PUBLIC KEY-----" and "-----END PUBLIC KEY-----"
+	 */
+	FString ToPem() const;
+
+private:
+	FString const ModulusB64Url;
+	FString const ExponentB64Url;
+};
+
+
+/**
+ * @brief Provide access to verify JWT and extract its content.
+ */
+class ACCELBYTEUE4SDK_API FJwt
+{
+public:
+	/**
+	 * @brief Construct FJwt from JWT string
+	 * @param JwtString JWT encoded as dot separated Base64Url string
+	 */
+	explicit FJwt(FString JwtString);
+
+	/**
+	 * @brief Verify this JWT using RSA public key
+	 * @param Key RSA public key
+	 * @return EJwtResult::Ok if signature match
+	 */
+	EJwtResult VerifyWith(FRsaPublicKey Key) const;
+
+	/**
+	 * @brief Get header content from JWT. Content could be any valid JSON having at least "alg" field
+	 * @return JWT header
+	 */
+	TSharedPtr<FJsonObject> const& Header() const;
+
+	/**
+	 * @brief Get payload content from JWT. Content could be any valid JSON
+	 * @return JWT payload
+	 */
+	TSharedPtr<FJsonObject> const& Payload() const;
+
+	/**
+	 * @brief Check if this JWT format is correct and both and payload are valid JSON encoded as Base64URL
+	 * @return true if  this JWT is valid, false otherwise
+	 */
+	bool IsValid() const;
+
+private:
+	FString const JwtString;
+	int32 const HeaderEnd;
+	int32 const PayloadEnd;
+	TSharedPtr<FJsonObject> const HeaderJsonPtr;
+	TSharedPtr<FJsonObject> const PayloadJsonPtr;
+};
+
+class ACCELBYTEUE4SDK_API FAccelByteUtilities
+{
+public:
+	template<typename CharType = TCHAR, template<typename> class PrintPolicy = TPrettyJsonPrintPolicy, typename InStructType>
+	static bool TArrayUStructToJsonString(const TArray<InStructType>& InArray, FString& OutJsonString, int64 CheckFlags = 0, int64 SkipFlags = 0, int32 Indent = 0)
+	{
+		const UStruct* StructDefinition = InStructType::StaticStruct();
+		TArray< TSharedPtr<FJsonValue> > JsonArray;
+
+		for (auto& Item : InArray)
+		{
+			const void* Struct = &Item;
+			TSharedPtr<FJsonObject> JsonObject = MakeShareable(new FJsonObject());
+			if (FJsonObjectConverter::UStructToJsonObject(StructDefinition, Struct, JsonObject.ToSharedRef(), CheckFlags, SkipFlags, nullptr))
+			{
+				TSharedRef< FJsonValueObject > JsonValue = MakeShareable(new FJsonValueObject(JsonObject));
+				JsonArray.Add(JsonValue);
+			}
+		}
+
+		TSharedRef<TJsonWriter<CharType, PrintPolicy<CharType>>> JsonWriter = TJsonWriterFactory<CharType, PrintPolicy<CharType>>::Create(&OutJsonString, Indent);
+		if (FJsonSerializer::Serialize(JsonArray, JsonWriter))
+		{
+			JsonWriter->Close();
+			return true;
+		}
+		else
+		{
+			UE_LOG(LogJson, Warning, TEXT("UStructToFormattedObjectString - Unable to write out json"));
+			JsonWriter->Close();
+		}
+
+		return false;
+	}
+
+	static void RemoveEmptyStrings(TSharedPtr<FJsonObject> Json);
+
+	template<typename TEnum>
+	static FString GetUEnumValueAsString(TEnum Value)
+	{
+		FString ValueString = UEnum::GetValueAsString(Value);
+		FString Delimiter = TEXT("::");
+
+		TArray<FString> ParsedStrings;
+
+		ValueString.ParseIntoArray(ParsedStrings, *Delimiter);
+
+		return ParsedStrings.Last();
+	}
+
+	template<typename TEnum>
+	static TEnum GetUEnumValueFromString(FString const& ValueString)
+	{
+		UEnum* EnumPtr = StaticEnum<TEnum>();
+		int64 ValueInt = 0;
+
+		if (EnumPtr != nullptr)
+		{
+			ValueInt = EnumPtr->GetValueByNameString(ValueString);
+
+			if (ValueInt == INDEX_NONE)
+			{
+				ValueInt = 0;
+			}
+		}
+
+		return static_cast<TEnum>(ValueInt);
+	}
+
+	static FString GetPlatformString(EAccelBytePlatformType Platform);
+
+	static FString GetAuthenticatorString(EAccelByteLoginAuthFactorType Authenticator);
+	
+	static FString CreateQueryParams(TMap<FString, FString> Map)
+	{
+		FString Query = TEXT("");
+		for (auto kvp : Map)
+		{
+			AppendQueryParam(Query, kvp.Key, kvp.Value);
+		}
+		return Query;
+	}
+
+	static FString CreateQueryParamValueUrlEncodedFromArray(const TArray<FString>& Array, const FString& Delimiter = TEXT(","))
+	{
+		FString QueryParamValue = TEXT("");
+		if (Array.Num() > 0)
+		{ 
+			for (int i = 0; i < Array.Num(); i++)
+			{
+				const FString& UrlEncodedStringValue = FGenericPlatformHttp::UrlEncode(Array[i]);
+				FString ItemAppended = FString::Printf(TEXT("%s%s"), *Delimiter, *UrlEncodedStringValue);
+				QueryParamValue.Append( i == 0 ? Array[i] : ItemAppended);
+			}
+		}
+		return QueryParamValue;	
+	}
+
+	static TMap<FString, FString> CreateQueryParamsAndSkipIfValueEmpty(TMap<FString, FString> Map)
+	{
+		TMap<FString, FString> Query = {};
+		for (auto kvp : Map)
+		{
+			if (!kvp.Key.IsEmpty() && !kvp.Value.IsEmpty())
+			{
+				Query.Add(kvp.Key, kvp.Value);
+			}
+		}
+		return Query;
+	}
+	
+	template<typename ObjectType> 
+	static bool UStructArrayToJsonObjectString(TArray<ObjectType> Objects, FString& OutString)
+	{
+		OutString.Append(TEXT("["));	
+		FString JsonArrayString = TEXT("");
+		for (auto Item : Objects)
+		{
+			FString Delimiter =	JsonArrayString.IsEmpty() ? TEXT("") : TEXT(",");
+			JsonArrayString.Append(Delimiter);
+			FString JsonObjectString = TEXT("");
+			if (!FJsonObjectConverter::UStructToJsonObjectString(Item, JsonObjectString))
+			{
+				return false;
+			}
+			JsonArrayString.Append(JsonObjectString); 
+		}
+		OutString.Append(JsonArrayString);
+		OutString.Append(TEXT("]")); 
+		return true;
+	}
+	
+private:
+	static void AppendQueryParam(FString& Query, FString const& Param, FString const& Value)
+	{
+		if (!Param.IsEmpty() && !Value.IsEmpty())
+		{			
+			Query.Append(Query.IsEmpty() ? TEXT("?") : TEXT("&"));
+			Query.Append(FString::Printf(TEXT("%s=%s"), *Param, *Value));
+		}		
+	}
+};
+
+USTRUCT(BlueprintType)
+struct ACCELBYTEUE4SDK_API FAccelByteModelsPubIp
+{
+	GENERATED_BODY()
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Web | Models | Ip")
+		FString Ip;
+};
+
+class ACCELBYTEUE4SDK_API FAccelByteNetUtilities
+{
+public:
+	/*
+	* @brief Get Public IP using api.ipify.org
+	*/
+	static void GetPublicIP(const THandler<FAccelByteModelsPubIp>& OnSuccess, const FErrorHandler& OnError);
+	static void DownloadFrom(const FString& Url, const FHttpRequestProgressDelegate& OnProgress, const THandler<TArray<uint8>>& OnDownloaded, const FErrorHandler& OnError);
+	static void UploadTo(const FString& Url, const TArray<uint8>& DataUpload, const FHttpRequestProgressDelegate& OnProgress,
+		const AccelByte::FVoidHandler& OnSuccess, const FErrorHandler& OnError, FString ContentType = TEXT("application/octet-stream"));
+};

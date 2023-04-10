@@ -1,0 +1,29 @@
+{
+    "FileVersion":  3,
+    "Version":  1,
+    "VersionName":  "4.1.0",
+    "FriendlyName":  "AccelByte Unreal Engine SDK",
+    "Description":  "Official AccelByte SDK for Unreal Engine 4",
+    "Category":  "Online Platform",
+    "CreatedBy":  "Accelbyte Inc",
+    "CreatedByUrl":  "https://accelbyte.io/",
+    "DocsUrl":  "https://docs.accelbyte.io/gsg/sdk-guides/ue4-sdk-getting-started.html",
+    "MarketplaceUrl":  "",
+    "SupportUrl":  "",
+    "CanContainContent":  false,
+    "IsBetaVersion":  false,
+    "Installed":  false,
+    "Modules":  [
+                    {
+                        "Name":  "AccelByteUe4Sdk",
+                        "Type":  "Runtime",
+                        "LoadingPhase":  "PreDefault"
+                    }
+                ],
+    "Plugins":  [
+                    {
+                        "Name":  "CISQLite3",
+                        "Enabled":  false
+                    }
+                ]
+}
